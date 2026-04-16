@@ -1,0 +1,246 @@
+clc, clearvars, 
+
+%set up the ray, functions and errors
+
+%for Binary Search
+r = @(t) [1, 2] * t;
+f1 = @(v) v(1).^2 - v(2) - 2;
+f2 = @(v) v(1).^4 + v(2).^2 + 2.*v(1).*v(2) - 12;
+f3 = @(v) v(1).^3 - 9 * v(1).^2 + 27 * v(1) - 27 - 10. ^ 6 * v(2);
+funcs = {f1, f2, f3};
+
+
+%for Integration
+deltas = [10^-1, 10^-4];
+g1 = @(v) 0.25 * v(1).^2 + 3 * v(2).^2 - 1;
+g2 = @(v) (v(1) + v(2)).^256 + (v(1) - v(2)).^256 - 4;
+funcs2 = {g1, g2};
+
+
+errors = [1 / 2, 10^-1, 10^-3, 10^-5, 10^-6];
+
+
+%####function for Binary Search
+function [intersectionPoint, iterationnum] = BinarySearchIntersection(r, f, err, lb, ub)
+    
+    iteration = 0; %count the iterations
+
+    while true
+
+        mid = (lb + ub) / 2;
+        
+        %store the signs
+        lb_sign = sign(f(r(lb)));
+        ub_sign = sign(f(r(ub)));
+        mid_sign = sign(f(r(mid)));
+        
+        %incrementing iteration
+        iteration = iteration + 1;
+        
+        % check whether a point exactly landed on a solution
+        if ub_sign == 0
+
+            intersectionPoint = r(ub);
+            break;
+        end
+
+        if lb_sign == 0
+
+            intersectionPoint = r(lb);
+            break;
+        end
+
+        if mid_sign == 0
+
+            intersectionPoint = r(mid);
+            break;
+        end
+     
+        %process for updating lower bound or upper bound
+        if lb_sign * mid_sign > 0
+            lb = mid; %
+        else
+            ub = mid; %
+        end
+        
+        %reaching a solution
+        if ub - lb <= err
+            intersectionPoint = r((ub + lb) / 2);
+            break;
+        end
+    end
+    iterationnum = iteration;
+end
+
+
+%##### Linear Integration
+function [sum, intersectionpts] = LinearNumericalIntegration(f, delta, lb, ub)
+    current_val = lb;
+    sum = 0.0;
+    pts = {}; %cell where intersection points are stored
+    while current_val <= ub
+        up_ray = @(t) [current_val, 0] + [0, 1] * t; % t > 0
+        down_ray = @(t) [current_val, 0] + [0, -1] * t; % t < 0
+
+        %Evaluating y intersections
+        [temp1, s1] = BinarySearchIntersection(up_ray, f, 10^-6, 0, 100);
+        upIntersectionPtY = temp1(2);
+
+        [temp2, s2] = BinarySearchIntersection(down_ray, f, 10^-6, 0, 100);
+        downIntersectionPtY = temp2(2);
+
+        %Calculating the area
+        sum = sum + (upIntersectionPtY - downIntersectionPtY) * delta;
+     
+        pts{end + 1} = temp1; %store the points back by back
+        pts{end + 1} = temp2;
+
+        current_val = current_val + delta; %update current_val
+    end
+    intersectionpts = pts;
+end
+
+%####Radial Integration
+function [sum, intersectionpts] = RadialNumericalIntegration(f, delta)
+    %setting up numbers
+    lb = 0;
+    ub = 2* pi;
+    current_val = lb;
+    sum = 0.0;
+    
+    pts = {}; %cell where intersection points are stored
+
+    while current_val <= ub
+        %set up a unit vector and use it as a direction vector
+        direction_unit_vector = [cos(current_val), sin(current_val)];
+        rotating_ray = @(t) direction_unit_vector * t;
+
+        %Calculate x and y intersections
+        [temp, k] = BinarySearchIntersection(rotating_ray, f, 10^-6, 0, 100);
+        IntersectionPtX = temp(1);
+        IntersectionPtY = temp(2);
+
+        sum = sum + (IntersectionPtX^2 + IntersectionPtY^2) / 2 * delta;
+        current_val = current_val + delta;
+        pts{end + 1} = temp; %store the intersection point
+    end
+    intersectionpts = pts;
+end
+
+%###Tables and plots for Binary Search and Integral Estimates
+    
+%cell and a matrix to store approximate solutions and iterations for Binary
+%Search
+points = cell(5, 3);
+iterations = zeros(5, 3);
+
+%assign the values
+for i = 1:3 %colums
+    for k = 1:5 %rows
+        [points{k, i}, iterations(k, i)] = BinarySearchIntersection(r, funcs{i}, errors(k), 0, 100);
+    end
+end
+
+
+%------BINARY SEARCH data and plot
+
+%making a table in txt format for BINARY SEARCH
+rowNames = {'Error 1/2','Error 10^-1','Error 10^-3','Error 10^-5','Error 10^-6'};
+colNames = {'f1','f2','f3'};
+
+%create and arrange a .txt file with preferred number formatting
+fid = fopen('points_table.txt','w'); 
+fprintf(fid,'%12s  %25s  %25s  %25s\n', '', colNames{:});
+
+for k = 1:5
+    fprintf(fid,'%12s', rowNames{k});
+    for i = 1:3
+        pt = points{k,i};
+        fprintf(fid,'  [%.10f, %.10f]', pt(1), pt(2)); %adequately format numbers
+    end
+    fprintf(fid,'\n');
+end
+fclose(fid); 
+
+%plot iterations versus error
+iterations_table = iterations(:,1)';
+x = -log10(errors);
+
+figure;
+plot(x, iterations_table,'-o','LineWidth',1.5);
+xlabel('-log10(Error)');
+ylabel('Iterations');
+grid on;
+title('Iterations vs Error'); 
+
+
+%---------INTEGRATION ESTIMATE data and plots
+
+scanTypes = {@LinearNumericalIntegration, @RadialNumericalIntegration};
+
+row = 1; %initial row, will handle each scantype in each i
+
+%first, record the results of estimations and intersection points for every
+%iteration.
+for i = 1:2 %for 1st column: functions
+    for j = 1:2 %for 2nd column: Scan Type
+        for k = 1:2 % For 3rd columnn: delta values
+            if j == 1
+                if i == 1 %since boundaries are different for linear scantype, make
+                    %a distinction
+                    [integral_results(row, k), PTS{i, j, k}] = scanTypes{j}(funcs2{i}, deltas(k), -1.999, 1.999); 
+                end
+                if i == 2
+                    [integral_results(row, k), PTS{i, j, k}] = scanTypes{j}(funcs2{i}, deltas(k), -1.0027, 1.0027);
+                end
+            else
+                [integral_results(row, k), PTS{i, j, k}] = scanTypes{j}(funcs2{i}, deltas(k));
+            end
+            
+        end
+        row = row + 1;
+    end
+end
+
+%Now create a table that includes data for integral estimations
+T = array2table(integral_results, 'VariableNames', {'delta=10^-1','delta=10^-4'}, ...
+    'RowNames', {'g1 Linear','g1 Radial','g2 Linear','g2 Radial'});
+
+disp(T)
+
+
+%Creating eight subplots for every parameter
+figure;
+rows = 2; cols = 4;   % layout for 8 subplots
+plotIndex = 1;
+
+%title management
+title1 = {'1st Func', '2nd Func'};
+title2 = {'Linear', 'Radial'};
+title3 = {'\Delta = 10^{-1}', '\Delta = 10^{-4}'};
+
+for i = 1:2 %iterate over implicit functions
+    for j = 1:2 %over scanTypes
+        for k = 1:2 %over deltas
+            subplot(rows, cols, plotIndex);
+            hold on;
+
+            current_pts = PTS{i,j,k}; %stores current point cell
+            if ~isempty(current_pts) %converting a cell of points into an array of size nx2
+                M = cell2mat(current_pts(:));
+                scatter(M(:,1), M(:,2), 13, 'filled');
+            end
+
+            axis equal; grid on;
+            
+            title(sprintf('%s | %s | %s', title1{i}, title2{j}, title3{k}));
+            xlabel('x'); ylabel('y');
+
+            plotIndex = plotIndex + 1;
+            hold off;
+        end
+    end
+end
+
+
+
